@@ -1,0 +1,74 @@
+# для сбора контейнера $ docker-compose up -d --build
+# для просмотра $ docker-compose ps
+# для просмотро логов docker-compose logs, либо выбираем конкретный сервис docker-compose logs -f 9-2-main
+
+# версия докер-компоузе
+version: "3.11"
+
+services:
+  db:
+    image: postgres:${POSTGRES_VERSION}
+    environment:
+      POSTGRES_DB:
+      POSTGRES_USER:
+      POSTGRES_PASSWORD:
+    restart: unless-stopped
+    networks:
+      skill-backend:
+  9-2-main: # название приложения
+    env_file: .env # переменные виртуального окружения
+    build: # на основе чего хотим задать наш сервис
+      context: .
+      dockerfile: Dockerfile # на основе докер файла
+    depends_on:
+      - db
+    volumes:
+      - .:\code
+    ports:
+      - "${DOCKER_EXPOSE_PORT:-8000}:${DJANGO_PORT:-8000}"  # порты для общения внутри контейнера DOCKER_EXPOSE_PORT-наружный порт для обращения из браузера
+    restart: unless-stopped #  каком случаее перезапускаем сервис
+    command: "python manage.py runserver 0.0.0.0:${DJANGO_PORT:-8000}"
+    networks: # внутренная сеть для общения бд внутри контейнеров
+      skill-backend:
+  redis:
+    image: redis:5.0 # у сервисов есть готовые решения вместо файлв докера, указываем только версию
+    env_file: .env
+    restart: unless-stopped
+    volumes:
+      - ./.docker/redis-data:/data # одинаковая папка на локальной машине и на докере
+    ports:
+      - ${REDIS_PORT}
+    networks:
+      skill-backend:
+  celery: # названия произвольны мы их сами пишем
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file: .env
+    image: celery:3.1 # собираем на основе имиджа, но с нашим докерфайлом
+    command: "celery - A 9-2-main worker -l info" # запускаем комманды в джанго приложении
+    depends_on:
+      - redis
+    environment:
+      CELERY_BROKER_URL: redis://${REDIS_HOST}:${REDIS_PORT}/
+    restart: always
+    networks:
+        skill-backend:
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file: .env
+    image: celery:3.1 # собираем на основе имиджа, но с нашим докерфайлом
+    command: "celery - A 9-2-main beat -l info" #
+    depends_on:
+      - redis
+    environment:
+      CELERY_BROKER_URL: redis://${REDIS_HOST}:${REDIS_PORT}/
+      CELERY_RESULT_BACKEND: redis://${REDIS_HOST}:${REDIS_PORT}/
+    restart: always
+    networks:
+        skill-backend:
+
+networks:
+   skill-backend:
